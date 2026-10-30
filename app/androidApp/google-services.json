@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "6860447534",
+    "project_id": "gradpathai-3915f",
+    "storage_bucket": "gradpathai-3915f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:6860447534:android:97b4f5fc15698f9bb3a4bf",
+        "android_client_info": {
+          "package_name": "org.gradpath.ai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAGOSdty4jWUwW4lvQPFAuqiA3oUnon1SU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

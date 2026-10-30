@@ -1,0 +1,145 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Ktor Server",
+      "type": "shell",
+      "command": "./gradlew :server:run",
+      "windows": {
+        "command": ".\\gradlew.bat :server:run"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Desktop App",
+      "type": "shell",
+      "command": "./gradlew :app:desktopApp:run",
+      "windows": {
+        "command": ".\\gradlew.bat :app:desktopApp:run"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Desktop App (Hot Reload)",
+      "type": "shell",
+      "command": "./gradlew :app:desktopApp:hotRun --auto",
+      "windows": {
+        "command": ".\\gradlew.bat :app:desktopApp:hotRun --auto"
+      },
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Web App (Wasm - Fast)",
+      "type": "shell",
+      "command": "./gradlew :app:webApp:wasmJsBrowserDevelopmentRun",
+      "windows": {
+        "command": ".\\gradlew.bat :app:webApp:wasmJsBrowserDevelopmentRun"
+      },
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Web App (JS)",
+      "type": "shell",
+      "command": "./gradlew :app:webApp:jsBrowserDevelopmentRun",
+      "windows": {
+        "command": ".\\gradlew.bat :app:webApp:jsBrowserDevelopmentRun"
+      },
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Install & Run Android App",
+      "type": "shell",
+      "command": "./gradlew :app:androidApp:installDebug && adb shell am start -n org.gradpath.ai/.MainActivity",
+      "windows": {
+        "command": ".\\gradlew.bat :app:androidApp:installDebug; adb shell am start -n org.gradpath.ai/.MainActivity"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Android App (assembleDebug)",
+      "type": "shell",
+      "command": "./gradlew :app:androidApp:assembleDebug",
+      "windows": {
+        "command": ".\\gradlew.bat :app:androidApp:assembleDebug"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run All Tests",
+      "type": "shell",
+      "command": "./gradlew check",
+      "windows": {
+        "command": ".\\gradlew.bat check"
+      },
+      "group": "test",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

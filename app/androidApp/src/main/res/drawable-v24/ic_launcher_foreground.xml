@@ -1,0 +1,69 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Subtle Ambient Drop Shadow for Cap -->
+    <path
+        android:fillColor="#33000000"
+        android:pathData="M 54,34 L 82,46 L 54,58 L 26,46 Z" />
+    <path
+        android:fillColor="#22000000"
+        android:pathData="M 37,51 L 37,61 C 37,68 71,68 71,61 L 71,51 Z" />
+
+    <!-- 1. Academic Cap Skullcap Base -->
+    <path
+        android:fillColor="#E2E8F0"
+        android:pathData="M 38,48 L 38,58 C 38,65 70,65 70,58 L 70,48 Z" />
+
+    <!-- 2. Mortarboard Diamond Top (Pure White) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 54,30 L 80,42 L 54,54 L 28,42 Z" />
+
+    <!-- 3. Mortarboard 3D Edge Highlight -->
+    <path
+        android:fillColor="#CBD5E1"
+        android:pathData="M 28,42 L 54,54 L 54,56.5 L 28,44.5 Z" />
+    <path
+        android:fillColor="#94A3B8"
+        android:pathData="M 80,42 L 54,54 L 54,56.5 L 80,44.5 Z" />
+
+    <!-- 4. Tassel Ribbon & Ring -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M 54,42 C 64,43 76,46 78,50 L 78,61 L 81,61 L 81,50 C 79,45 66,40.5 54,40.5 Z" />
+
+    <!-- Tassel Hanging Ornament / Fringe -->
+    <path
+        android:fillColor="#0284C7"
+        android:pathData="M 77,59 H 82 V 64 C 82,65.5 77,65.5 77,64 Z" />
+
+    <!-- Cap Center Button -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M 54,40.5 A 2,2 0 1 0 54,44.5 A 2,2 0 1 0 54,40.5 Z" />
+
+    <!-- 5. Autonomous AI Compass / Research Sparkle Star -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M 54,57 Q 54,61 58,61 Q 54,61 54,65 Q 54,61 50,61 Q 54,61 54,57 Z" />
+
+    <!-- 6. Ascending Graduate Pathway (Chevron Path 1) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 36,75 L 54,65 L 72,75" />
+
+    <!-- 7. Ascending Graduate Pathway (Chevron Path 2 - Cyan Accent) -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 42,83 L 54,76 L 66,83" />
+
+</vector>
