@@ -4,7 +4,7 @@
 FROM gradle:8.12-jdk21 AS build
 WORKDIR /home/gradle/project
 COPY --chown=gradle:gradle . .
-RUN ./gradlew :server:installDist --no-daemon
+RUN chmod +x gradlew && ./gradlew :server:installDist --no-daemon
 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
