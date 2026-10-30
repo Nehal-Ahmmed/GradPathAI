@@ -1,0 +1,21 @@
+# ==============================================================================
+# GradPath AI - Render Infrastructure as Code Specification
+# ==============================================================================
+services:
+  - type: web
+    name: gradpath-backend-gateway
+    env: docker
+    dockerfilePath: server/Dockerfile
+    dockerContext: .
+    plan: starter
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: WORKSPACE_DIR
+        value: /app/data
+      - key: FIREBASE_PROJECT_ID
+        value: gradpathai-3915f
+      - key: FIREBASE_API_KEY
+        value: AIzaSyAGOSdty4jWUwW4lvQPFAuqiA3oUnon1SU
+    autoDeploy: true
