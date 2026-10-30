@@ -5,7 +5,7 @@ package org.gradpath.ai
  * Pure Cloud Mode by default pointing to the Render production gateway.
  */
 object GradPathConfig {
-    var baseUrl: String = "https://gradpath-backend.aethersystems.com"
+    var baseUrl: String = "https://gradpath-backend-gateway.onrender.com"
 
     var host: String
         get() = try {
