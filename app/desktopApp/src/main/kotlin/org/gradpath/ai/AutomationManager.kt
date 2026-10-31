@@ -22,7 +22,11 @@ data class AgentPermissions(
 )
 
 object AutomationManager {
-    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
+    private val json = Json {
+        prettyPrint = true
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
     private val sidecarsBaseDir = File(System.getProperty("user.home"), ".gemini/config/sidecars").apply {
         if (!exists()) mkdirs()
     }
@@ -147,6 +151,7 @@ object AutomationManager {
                 cron,
                 "agentapi",
                 "new-conversation",
+                "--model=pro",
                 "--",
                 prompt
             ),
@@ -184,6 +189,159 @@ object AutomationManager {
         } catch (e: Exception) {
             println("Manual sweep trigger error: ${e.message}")
             false
+        }
+    }
+
+    val automationsFile = File(dbDir, "automations.json")
+
+    fun getDefaultAutomations(): List<ScheduledAutomationDisplay> {
+        return listOf(
+            ScheduledAutomationDisplay(
+                id = "gradpath-admissions-funding-sweeper",
+                name = "Top 200 Admissions & Funding Sweeper",
+                pillarTag = "#Top200Admissions · #ScholarshipAlert",
+                description = "Daily 8:00 AM sweep of Top 200 CS/IT universities for fully-funded MS/PhD circulars, PI lab openings, and tuition + stipend breakdowns.",
+                frequency = "Daily",
+                timeOfDay = "8:00 AM",
+                timeZone = "Asia/Dhaka",
+                scheduleTime = "Daily at 8:00 AM (Dhaka)",
+                isEnabled = true,
+                contextFile = "tasks/admissions_context.md",
+                prompt = """
+                    [AUTONOMOUS HEADLESS TASK - IMMEDIATE EXECUTION REQUIRED]
+                    You are GradPath AI's Elite Academic Opportunity Sweeper. Do NOT ask clarifying questions or wait for human input. You must execute all of the following steps immediately in this turn:
+                    1. Read the student's profile and Top 200 scope from 'D:\University Research\tasks\admissions_context.md'.
+                    2. Research active admissions circulars, fully-funded PhD openings, and graduate assistantships (RA/TA) in the student's target countries for their major.
+                    3. For each opportunity discovered, extract:
+                       - Accurate funding breakdown (Tuition waiver amount + Monthly stipend).
+                       - Hiring Principal Investigator (PI), Lab name, and recent 2025/2026 paper citation.
+                       - Admission criteria (Min CGPA cutoff, GRE waiver policy, IELTS requirement).
+                       - Official circular URL and high-res campus/crest OpenGraph image URL.
+                       - Calculate candidate alignment match score (%) based on the student's profile.
+                    4. Prepend newly discovered opportunities to 'D:\University Research\db\feed.json' as WatchdogOpportunity JSON.
+                    5. Execute: powershell.exe -ExecutionPolicy Bypass -File "D:\University Research\tasks\sync_to_firestore.ps1" -Collection "feed" -FilePath "D:\University Research\db\feed.json".
+                """.trimIndent()
+            ),
+            ScheduledAutomationDisplay(
+                id = "gradpath-career-policy-advisor",
+                name = "Country Career & Visa Policy Advisor",
+                pillarTag = "#CountryCareerIntel · #CareerActionPlan",
+                description = "Daily 7:00 PM intelligence sweep for tech job market trends, post-study work visa updates, and next-step milestones.",
+                frequency = "Daily",
+                timeOfDay = "7:00 PM",
+                timeZone = "Asia/Dhaka",
+                scheduleTime = "Daily at 7:00 PM (Dhaka)",
+                isEnabled = true,
+                contextFile = "tasks/career_policy_context.md",
+                prompt = """
+                    [AUTONOMOUS HEADLESS TASK - IMMEDIATE EXECUTION REQUIRED]
+                    You are GradPath AI's Global Career & Policy Advisor. Do NOT ask clarifying questions or wait for human input. You must execute all of the following steps immediately in this turn:
+                    1. Read the student's background and country goals from 'D:\University Research\tasks\career_policy_context.md'.
+                    2. Conduct live web research on immigration & career news affecting graduate students in target countries:
+                       - USA: Post-Study Work Visas (36-Month STEM OPT extension rules and H-1B lottery cap exemptions).
+                       - Germany: Chancenkarte (Opportunity Card) and EU Blue Card minimum gross salary threshold after graduation.
+                       - Canada: New PGWP rules, eligible field-of-study restrictions, and Express Entry STEM category draws.
+                       - Tech job market hiring trends and average starting graduate salaries in the student's field.
+                    3. Structure findings as WatchdogOpportunity objects tagged with #CountryCareerIntel and #CareerActionPlan.
+                    4. Prepend newly discovered opportunities to 'D:\University Research\db\feed.json' as WatchdogOpportunity JSON.
+                    5. Push to Firestore by executing:
+                       powershell.exe -ExecutionPolicy Bypass -File "D:\University Research\tasks\sync_to_firestore.ps1" -Collection "feed" -FilePath "D:\University Research\db\feed.json".
+                """.trimIndent()
+            )
+        )
+    }
+
+    fun loadAutomations(): List<ScheduledAutomationDisplay> {
+        if (!automationsFile.exists() || automationsFile.length() == 0L) {
+            val defaults = getDefaultAutomations()
+            try {
+                automationsFile.writeText(json.encodeToString(defaults))
+            } catch (_: Exception) {}
+            return defaults
+        }
+        return try {
+            json.decodeFromString<List<ScheduledAutomationDisplay>>(automationsFile.readText())
+        } catch (_: Exception) {
+            getDefaultAutomations()
+        }
+    }
+
+    fun saveAutomation(item: ScheduledAutomationDisplay) {
+        val current = loadAutomations().toMutableList()
+        val index = current.indexOfFirst { it.id == item.id }
+        if (index >= 0) {
+            current[index] = item
+        } else {
+            current.add(item)
+        }
+        try {
+            automationsFile.writeText(json.encodeToString(current))
+        } catch (_: Exception) {}
+
+        if (item.isEnabled) {
+            val cron = parseCron(item.frequency, item.timeOfDay, item.timeZone)
+            val finalPrompt = if (!item.prompt.contains("sync_to_firestore.ps1")) {
+                item.prompt + "\n\nFinally, execute:\npowershell.exe -ExecutionPolicy Bypass -File \"D:\\University Research\\tasks\\sync_to_firestore.ps1\" -Collection \"feed\" -FilePath \"D:\\University Research\\db\\feed.json\""
+            } else item.prompt
+
+            registerAutomation(
+                id = item.id,
+                displayName = item.name,
+                description = item.description,
+                cron = cron,
+                prompt = finalPrompt
+            )
+        } else {
+            try {
+                File(sidecarsBaseDir, item.id).deleteRecursively()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun deleteAutomation(id: String) {
+        val current = loadAutomations().filterNot { it.id == id }
+        try {
+            automationsFile.writeText(json.encodeToString(current))
+            File(sidecarsBaseDir, id).deleteRecursively()
+        } catch (_: Exception) {}
+    }
+
+    fun toggleAutomation(id: String, isEnabled: Boolean) {
+        val current = loadAutomations().map {
+            if (it.id == id) it.copy(isEnabled = isEnabled) else it
+        }
+        try {
+            automationsFile.writeText(json.encodeToString(current))
+        } catch (_: Exception) {}
+
+        val target = current.find { it.id == id }
+        if (target != null) {
+            if (isEnabled) {
+                saveAutomation(target)
+            } else {
+                try {
+                    File(sidecarsBaseDir, id).deleteRecursively()
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun parseCron(frequency: String, timeOfDay: String, timeZone: String): String {
+        val parts = timeOfDay.trim().split(" ")
+        val timeParts = parts[0].split(":")
+        var hour = timeParts[0].toIntOrNull() ?: 9
+        val minute = if (timeParts.size > 1) timeParts[1].toIntOrNull() ?: 0 else 0
+        val amPm = if (parts.size > 1) parts[1].uppercase() else "AM"
+
+        if (amPm == "PM" && hour < 12) hour += 12
+        if (amPm == "AM" && hour == 12) hour = 0
+
+        val tz = if (timeZone.isNotBlank()) "CRON_TZ=$timeZone " else "CRON_TZ=Asia/Dhaka "
+
+        return if (frequency.equals("Weekly", ignoreCase = true)) {
+            "$tz$minute $hour * * 1"
+        } else {
+            "$tz$minute $hour * * *"
         }
     }
 }

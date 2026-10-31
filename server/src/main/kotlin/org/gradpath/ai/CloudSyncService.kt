@@ -17,6 +17,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import java.io.File
@@ -53,7 +54,11 @@ data class QueuedSyncItem(
  */
 class CloudSyncService {
 
-    private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
+    private val json = Json {
+        prettyPrint = true
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
     private val configFile = File(WorkspaceManager.DB_DIR, "firebase_config.json")
     private val queueFile = File(WorkspaceManager.DB_DIR, "sync_queue.json")
 
@@ -160,6 +165,29 @@ class CloudSyncService {
         }
     }
 
+    suspend fun fetchProfileFromCloud(): UserProfile? = withContext(Dispatchers.IO) {
+        val config = loadConfig() ?: return@withContext null
+        val url = "https://firestore.googleapis.com/v1/projects/${config.projectId}/databases/(default)/documents/profile/current_profile?key=${config.apiKey}"
+        try {
+            val response = httpClient.get(url)
+            if (response.status.isSuccess()) {
+                val body = response.bodyAsText()
+                val root = json.parseToJsonElement(body).jsonObject
+                val fields = root["fields"]?.jsonObject
+                val payload = fields?.get("payloadJson")
+                    ?.jsonObject?.get("stringValue")
+                    ?.jsonPrimitive?.contentOrNull
+                if (!payload.isNullOrBlank() && payload != "{}") {
+                    return@withContext json.decodeFromString<UserProfile>(payload)
+                }
+            }
+            null
+        } catch (e: Exception) {
+            println("[CloudSync] Cloud profile fetch notice: ${e.message}")
+            null
+        }
+    }
+
     private suspend fun enqueueItem(collection: String, documentId: String, payloadJson: String) = withContext(Dispatchers.IO) {
         val queue = loadQueue().toMutableList()
         queue.removeIf { it.collection == collection && it.documentId == documentId }
@@ -209,12 +237,57 @@ class CloudSyncService {
     private suspend fun commitDocumentToFirestore(config: FirebaseConfig, item: QueuedSyncItem): Boolean {
         val url = "https://firestore.googleapis.com/v1/projects/${config.projectId}/databases/(default)/documents/${item.collection}/${item.documentId}?key=${config.apiKey}"
 
+        val parsedElement = runCatching { json.parseToJsonElement(item.payloadJson).jsonObject }.getOrNull()
+
         val firestoreBody = buildJsonObject {
             putJsonObject("fields") {
                 putJsonObject("payloadJson") { put("stringValue", item.payloadJson) }
                 putJsonObject("collection") { put("stringValue", item.collection) }
                 putJsonObject("documentId") { put("stringValue", item.documentId) }
                 putJsonObject("syncedAt") { put("stringValue", LocalDateTime.now().toString()) }
+
+                // Structured field injection for Firebase Console clarity
+                if (item.collection == "profile" && parsedElement != null) {
+                    parsedElement["fullName"]?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("fullName") { put("stringValue", it) }
+                    }
+                    val academic = parsedElement["academic"]?.jsonObject
+                    academic?.get("major")?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("major") { put("stringValue", it) }
+                    }
+                    academic?.get("institution")?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("institution") { put("stringValue", it) }
+                    }
+                    academic?.get("gpa")?.jsonPrimitive?.doubleOrNull?.let {
+                        putJsonObject("gpa") { put("doubleValue", it) }
+                    }
+                    val target = parsedElement["target"]?.jsonObject
+                    target?.get("targetDegree")?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("degreeTrack") { put("stringValue", it) }
+                    }
+                    target?.get("targetTerm")?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("targetTerm") { put("stringValue", it) }
+                    }
+                } else if (item.collection == "feed" && parsedElement != null) {
+                    parsedElement["title"]?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("title") { put("stringValue", it) }
+                    }
+                    parsedElement["university"]?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("university") { put("stringValue", it) }
+                    }
+                    parsedElement["country"]?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("country") { put("stringValue", it) }
+                    }
+                    parsedElement["degreeTrack"]?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("degreeTrack") { put("stringValue", it) }
+                    }
+                    parsedElement["fundingType"]?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("fundingType") { put("stringValue", it) }
+                    }
+                    parsedElement["officialUrl"]?.jsonPrimitive?.contentOrNull?.let {
+                        putJsonObject("officialUrl") { put("stringValue", it) }
+                    }
+                }
             }
         }.toString()
 

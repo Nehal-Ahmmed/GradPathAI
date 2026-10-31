@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import org.gradpath.ai.ui.components.*
 import org.gradpath.ai.viewmodel.FeedViewModel
+import org.gradpath.ai.viewmodel.ProfileViewModel
 
 enum class Screen(val title: String, val icon: ImageVector) {
     HOME("Home", Icons.Default.Home),
@@ -61,7 +62,11 @@ enum class Screen(val title: String, val icon: ImageVector) {
 @Composable
 fun App(
     onTriggerManualSweep: (() -> Unit)? = null,
-    directChatRunner: ((String) -> Flow<String>)? = null
+    directChatRunner: ((String) -> Flow<String>)? = null,
+    onLoadAutomations: (() -> List<ScheduledAutomationDisplay>)? = null,
+    onSaveAutomation: ((ScheduledAutomationDisplay) -> Unit)? = null,
+    onDeleteAutomation: ((String) -> Unit)? = null,
+    onToggleAutomation: ((String, Boolean) -> Unit)? = null
 ) {
     val currentOwner = LocalViewModelStoreOwner.current
     val fallbackOwner = remember {
@@ -80,6 +85,8 @@ fun App(
         LocalViewModelStoreOwner provides (currentOwner ?: fallbackOwner)
     ) {
         val feedViewModel: FeedViewModel = viewModel { FeedViewModel() }
+        val profileViewModel: ProfileViewModel = viewModel { ProfileViewModel() }
+        val userProfile by profileViewModel.profile.collectAsState()
         var isDarkMode by remember { mutableStateOf(true) }
         var currentScreen by remember { mutableStateOf(Screen.HOME) }
         var isNavRailExpanded by remember { mutableStateOf(false) }
@@ -112,6 +119,16 @@ fun App(
                     }
                     delay(5000)
                 }
+            }
+        }
+
+        // Initialize and fetch user profile from Cloud Firestore / Gateway on launch
+        LaunchedEffect(Unit) {
+            profileViewModel.loadProfile()
+        }
+        LaunchedEffect(isServerConnected) {
+            if (isServerConnected) {
+                profileViewModel.loadProfile()
             }
         }
 
@@ -175,7 +192,9 @@ fun App(
                                     onOpenShortcutsDialog = {
                                         scope.launch { drawerState.close() }
                                         showShortcutsDialog = true
-                                    }
+                                    },
+                                    userName = userProfile.fullName.ifBlank { "Candidate" },
+                                    degreeTrack = if (userProfile.target.targetDegree == TargetDegree.PHD) "Direct Ph.D. Track" else "Funded Master's Track"
                                 )
                             }
                         }
@@ -192,7 +211,9 @@ fun App(
                                         isDarkMode = isDarkMode,
                                         onToggleTheme = { isDarkMode = !isDarkMode },
                                         onOpenNotifications = { currentScreen = Screen.NOTIFICATIONS },
-                                        unreadNotificationCount = unreadNotificationCount
+                                        unreadNotificationCount = unreadNotificationCount,
+                                        userName = userProfile.fullName.ifBlank { "Candidate" },
+                                        degreeTrack = if (userProfile.target.targetDegree == TargetDegree.PHD) "Direct Ph.D. Track" else "Funded Master's Track"
                                     )
                                 } else if (currentScreen != Screen.HOME) {
                                     MobileTopAppBar(
@@ -295,10 +316,15 @@ fun App(
                                                 onTriggerManualSweep = {
                                                     onTriggerManualSweep?.invoke()
                                                     feedViewModel.fetchFeed(isServerConnected)
-                                                }
+                                                },
+                                                onLoadAutomations = onLoadAutomations,
+                                                onSaveAutomation = onSaveAutomation,
+                                                onDeleteAutomation = onDeleteAutomation,
+                                                onToggleAutomation = onToggleAutomation
                                             )
                                             Screen.PROFILE -> ProfileScreen(
-                                                isServerConnected = isServerConnected
+                                                isServerConnected = isServerConnected,
+                                                viewModel = profileViewModel
                                             )
                                             Screen.WATCHDOGS -> WatchdogsScreen(
                                                 isServerConnected = isServerConnected
@@ -389,7 +415,9 @@ fun DesktopTopNavBar(
     isDarkMode: Boolean,
     onToggleTheme: () -> Unit,
     onOpenNotifications: () -> Unit,
-    unreadNotificationCount: Int = 14
+    unreadNotificationCount: Int = 14,
+    userName: String = "Candidate",
+    degreeTrack: String = "Doctoral Track"
 ) {
     val colors = GradPathTheme.colors
 
@@ -556,6 +584,15 @@ fun DesktopTopNavBar(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            val userInitials = remember(userName) {
+                                val parts = userName.trim().split("\\s+".toRegex()).filter { it.isNotBlank() }
+                                when {
+                                    parts.size >= 2 -> "${parts[0].first()}${parts[1].first()}".uppercase()
+                                    parts.size == 1 && parts[0].isNotEmpty() -> parts[0].take(2).uppercase()
+                                    else -> "AK"
+                                }
+                            }
+
                             Box(
                                 modifier = Modifier
                                     .size(28.dp)
@@ -568,7 +605,7 @@ fun DesktopTopNavBar(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "AK",
+                                    text = userInitials,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace,
@@ -578,13 +615,13 @@ fun DesktopTopNavBar(
 
                             Column(verticalArrangement = Arrangement.Center) {
                                 Text(
-                                    text = "Avik Kundu",
+                                    text = userName,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = colors.onSurface
                                 )
                                 Text(
-                                    text = "Doctoral Track",
+                                    text = degreeTrack,
                                     fontSize = 9.sp,
                                     fontFamily = FontFamily.Monospace,
                                     color = colors.faintText
@@ -1401,7 +1438,9 @@ fun GradPathDrawerContent(
     onClose: () -> Unit,
     onTriggerRadarSweep: () -> Unit = {},
     onOpenExportDialog: () -> Unit = {},
-    onOpenShortcutsDialog: () -> Unit = {}
+    onOpenShortcutsDialog: () -> Unit = {},
+    userName: String = "Candidate",
+    degreeTrack: String = "Doctoral Track"
 ) {
     val colors = GradPathTheme.colors
 
@@ -1466,6 +1505,15 @@ fun GradPathDrawerContent(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    val drawerInitials = remember(userName) {
+                        val parts = userName.trim().split("\\s+".toRegex()).filter { it.isNotBlank() }
+                        when {
+                            parts.size >= 2 -> "${parts[0].first()}${parts[1].first()}".uppercase()
+                            parts.size == 1 && parts[0].isNotEmpty() -> parts[0].take(2).uppercase()
+                            else -> "AK"
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .size(36.dp)
@@ -1474,12 +1522,12 @@ fun GradPathDrawerContent(
                             .border(1.dp, colors.academicBlue.copy(alpha = 0.4f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("AK", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.academicBlue)
+                        Text(drawerInitials, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.academicBlue)
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Avik Kundu", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = colors.onSurface)
-                        Text("Doctoral Track · Fall 2027", fontSize = 11.sp, color = colors.onSurfaceVariant)
+                        Text(userName, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = colors.onSurface)
+                        Text("$degreeTrack · Fall 2026", fontSize = 11.sp, color = colors.onSurfaceVariant)
                     }
 
                     Icon(

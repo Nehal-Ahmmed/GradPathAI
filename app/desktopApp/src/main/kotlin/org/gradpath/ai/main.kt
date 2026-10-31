@@ -51,6 +51,7 @@ fun main() {
             onCloseRequest = ::exitApplication,
             state = windowState,
             visible = true,
+            alwaysOnTop = true,
             title = "GradPath AI - Graduate Research & Admissions Partner",
         ) {
             LaunchedEffect(Unit) {
@@ -61,6 +62,9 @@ fun main() {
                     window.isVisible = true
                     window.toFront()
                     window.requestFocus()
+                    // Keep on top briefly to force Windows to show it over the IDE, then release
+                    kotlinx.coroutines.delay(1200)
+                    window.isAlwaysOnTop = false
                 } catch (_: Exception) {}
 
                 try {
@@ -92,6 +96,18 @@ fun main() {
                 },
                 directChatRunner = { prompt ->
                     desktopAntigravityService.executeResearchStream(prompt)
+                },
+                onLoadAutomations = {
+                    AutomationManager.loadAutomations()
+                },
+                onSaveAutomation = { item ->
+                    AutomationManager.saveAutomation(item)
+                },
+                onDeleteAutomation = { id ->
+                    AutomationManager.deleteAutomation(id)
+                },
+                onToggleAutomation = { id, enabled ->
+                    AutomationManager.toggleAutomation(id, enabled)
                 }
             )
         }

@@ -63,6 +63,7 @@ data class ScoreBreakdown(
 
 @Serializable
 data class UserProfile(
+    val fullName: String = "",
     val academic: AcademicProfile = AcademicProfile(),
     val tests: TestScores = TestScores(),
     val research: ResearchExperience = ResearchExperience(),

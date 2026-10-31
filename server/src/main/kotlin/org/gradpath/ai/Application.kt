@@ -10,6 +10,9 @@ import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -48,6 +51,13 @@ fun Application.module() {
     val profileService = ProfileService(cloudSyncService)
     val watchdogService = WatchdogSweeperService(cloudSyncService)
     val diaryService = DiaryService(profileService, cloudSyncService)
+
+    // Drain pending sync queue on startup
+    CoroutineScope(Dispatchers.IO).launch {
+        runCatching {
+            cloudSyncService.processQueue()
+        }
+    }
 
     routing {
         get("/") {

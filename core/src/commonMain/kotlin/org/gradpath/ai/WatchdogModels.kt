@@ -181,3 +181,19 @@ object WatchdogRegistry {
         )
     )
 }
+
+@Serializable
+data class ScheduledAutomationDisplay(
+    val id: String,
+    val name: String,
+    val pillarTag: String,
+    val description: String,
+    val frequency: String = "Daily",
+    val timeOfDay: String = "9:00 AM",
+    val timeZone: String = "Asia/Dhaka",
+    val scheduleTime: String = "$frequency at $timeOfDay ($timeZone)",
+    val isEnabled: Boolean = true,
+    val contextFile: String = "tasks/admissions_context.md",
+    val prompt: String = ""
+)
+

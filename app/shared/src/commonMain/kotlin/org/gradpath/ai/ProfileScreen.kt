@@ -1,8 +1,7 @@
 package org.gradpath.ai
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -16,12 +15,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -30,9 +35,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import org.gradpath.ai.ui.components.*
 import org.gradpath.ai.viewmodel.ProfileViewModel
 
@@ -60,6 +69,7 @@ fun ProfileScreen(
     val clipboardManager = LocalClipboardManager.current
 
     val profile by viewModel.profile.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
     val auditResult by viewModel.auditResult.collectAsState()
     val isAuditing by viewModel.isAuditing.collectAsState()
     val showDocAuditor by viewModel.showDocAuditor.collectAsState()
@@ -73,8 +83,8 @@ fun ProfileScreen(
         return
     }
 
-    LaunchedEffect(isServerConnected) {
-        viewModel.loadProfile(isServerConnected)
+    LaunchedEffect(Unit) {
+        viewModel.loadProfile()
     }
 
     val scoreBreakdown = remember(profile) {
@@ -93,6 +103,80 @@ fun ProfileScreen(
         }
     }
 
+    val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val pullOffset = remember { Animatable(0f) }
+    val refreshThresholdPx = with(density) { 72.dp.toPx() }
+    val maxPullPx = with(density) { 130.dp.toPx() }
+    val scrollState = rememberScrollState()
+
+    LaunchedEffect(isLoading) {
+        if (!isLoading && pullOffset.value > 0f) {
+            pullOffset.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            )
+        }
+    }
+
+    val nestedScrollConnection = remember(isLoading) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < 0 && pullOffset.value > 0f) {
+                    val newOffset = (pullOffset.value + available.y).coerceAtLeast(0f)
+                    val consumed = newOffset - pullOffset.value
+                    coroutineScope.launch { pullOffset.snapTo(newOffset) }
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                val isAtTop = scrollState.value == 0
+                if (available.y > 0 && isAtTop && source == NestedScrollSource.UserInput) {
+                    val tension = (1f - (pullOffset.value / maxPullPx).coerceIn(0f, 0.85f)) * 0.45f
+                    val delta = available.y * tension
+                    val newOffset = (pullOffset.value + delta).coerceAtMost(maxPullPx)
+                    coroutineScope.launch { pullOffset.snapTo(newOffset) }
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (pullOffset.value > 0f) {
+                    if (pullOffset.value >= refreshThresholdPx && !isLoading) {
+                        viewModel.refreshProfile()
+                        pullOffset.animateTo(
+                            targetValue = with(density) { 46.dp.toPx() },
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessLow
+                            )
+                        )
+                    } else {
+                        pullOffset.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessLow
+                            )
+                        )
+                    }
+                    return available
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -100,55 +184,52 @@ fun ProfileScreen(
     ) {
         val isMobile = maxWidth < 768.dp
         val horizontalPadding = if (isMobile) GradPathSpace.md else GradPathSpace.xxl
-        val scrollState = rememberScrollState()
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(
-                    start = horizontalPadding,
-                    end = horizontalPadding,
-                    top = GradPathSpace.md,
-                    bottom = if (isMobile) 96.dp else GradPathSpace.xxxl
-                ),
-            verticalArrangement = Arrangement.spacedBy(GradPathSpace.md)
+                .then(if (isMobile) Modifier.nestedScroll(nestedScrollConnection) else Modifier)
         ) {
-            // =================================================================
-            // 1. TOP CANDIDATE IDENTITY HEADER
-            // =================================================================
-            ProfileCandidateHeader(
-                profile = profile,
-                scoreBreakdown = scoreBreakdown,
-                isEditMode = isEditMode,
-                isMobile = isMobile,
-                onToggleEditMode = {
-                    if (!isEditMode) {
-                        editDraft = profile
-                    }
-                    isEditMode = !isEditMode
-                },
-                onOpenDocAuditor = { viewModel.setShowDocAuditor(true) },
-                onRunAudit = { viewModel.runAudit(isServerConnected) },
-                isAuditing = isAuditing,
-                isServerConnected = isServerConnected
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset { IntOffset(0, pullOffset.value.roundToInt()) }
+                    .verticalScroll(scrollState)
+                    .padding(
+                        start = horizontalPadding,
+                        end = horizontalPadding,
+                        top = GradPathSpace.md,
+                        bottom = if (isMobile) 96.dp else GradPathSpace.xxxl
+                    ),
+                verticalArrangement = Arrangement.spacedBy(GradPathSpace.md)
+            ) {
+                // =================================================================
+                // 1. TOP CANDIDATE IDENTITY HEADER
+                // =================================================================
+                ProfileCandidateHeader(
+                    profile = if (isEditMode) editDraft else profile,
+                    scoreBreakdown = if (isEditMode) ProfileScoringEngine.calculateScore(editDraft) else scoreBreakdown,
+                    isEditMode = isEditMode,
+                    isMobile = isMobile,
+                    isLoading = isLoading,
+                    onRefresh = { viewModel.refreshProfile() },
+                    onToggleEditMode = {
+                        if (!isEditMode) {
+                            editDraft = profile
+                            isEditMode = true
+                        } else {
+                            viewModel.updateProfile(editDraft)
+                            isEditMode = false
+                        }
+                    },
+                    onOpenDocAuditor = { viewModel.setShowDocAuditor(true) },
+                    onRunAudit = { viewModel.runAudit(isServerConnected) },
+                    isAuditing = isAuditing,
+                    isServerConnected = isServerConnected
+                )
 
             // =================================================================
-            // 2. MODE SELECTOR PILL (Observe vs. Edit)
-            // =================================================================
-            ProfileModeSelectorPill(
-                isEditMode = isEditMode,
-                onSelectMode = { newEditState ->
-                    if (newEditState) {
-                        editDraft = profile
-                    }
-                    isEditMode = newEditState
-                }
-            )
-
-            // =================================================================
-            // 3. MAIN CONTENT: OBSERVE MODE vs. EDIT MODE
+            // 2. MAIN CONTENT: OBSERVE MODE vs. EDIT MODE
             // =================================================================
             AnimatedContent(
                 targetState = isEditMode,
@@ -163,7 +244,7 @@ fun ProfileScreen(
                         draft = editDraft,
                         onDraftChange = { editDraft = it },
                         onSave = {
-                            viewModel.updateProfile(editDraft, isServerConnected)
+                            viewModel.updateProfile(editDraft)
                             isEditMode = false
                         },
                         onCancel = {
@@ -196,7 +277,64 @@ fun ProfileScreen(
                 }
             }
         }
+
+        // Bouncing Pull-to-Refresh Indicator Badge on Mobile
+        if (isMobile && (pullOffset.value > 0f || isLoading)) {
+            val isReady = pullOffset.value >= refreshThresholdPx
+            val progress = (pullOffset.value / refreshThresholdPx).coerceIn(0f, 1f)
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset { IntOffset(0, (pullOffset.value * 0.6f - 38.dp.toPx()).roundToInt().coerceAtLeast(8.dp.toPx().roundToInt())) }
+                    .padding(top = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(GradPathRadii.rPill),
+                    color = palette.card,
+                    border = BorderStroke(1.dp, if (isReady || isLoading) palette.academicBlue else palette.borderSoft),
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(13.dp),
+                                strokeWidth = 2.dp,
+                                color = palette.academicBlue
+                            )
+                            Text(
+                                text = "Syncing with Cloud Firestore...",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = palette.academicBlue
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (isReady) Icons.Default.Refresh else Icons.Default.ArrowDownward,
+                                contentDescription = null,
+                                tint = if (isReady) palette.academicBlue else palette.textMuted,
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .rotate(progress * 180f)
+                            )
+                            Text(
+                                text = if (isReady) "Release to reload Firestore" else "Pull to sync Firestore",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (isReady) palette.academicBlue else palette.textSecondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
+}
 }
 
 // =============================================================================
@@ -212,13 +350,16 @@ private fun ProfileCandidateHeader(
     onToggleEditMode: () -> Unit,
     onOpenDocAuditor: () -> Unit,
     onRunAudit: () -> Unit,
+    onRefresh: () -> Unit,
+    isLoading: Boolean,
     isAuditing: Boolean,
     isServerConnected: Boolean
 ) {
     val palette = GradPathThemeTokens.palette
+    val candidateName = profile.fullName.ifBlank { "Candidate Profile" }
     val degreeTrackLabel = if (profile.target.targetDegree == TargetDegree.PHD) "Direct Ph.D. Track" else "Funded Master's Track"
-    val institutionDisplay = profile.academic.institution.ifBlank { "University of Dhaka" }
-    val majorDisplay = profile.academic.major.ifBlank { "Computer Science & Engineering" }
+    val institutionDisplay = profile.academic.institution.ifBlank { "Institution Not Set" }
+    val majorDisplay = profile.academic.major.ifBlank { "Major Not Set" }
 
     GCard(
         modifier = Modifier.fillMaxWidth(),
@@ -232,7 +373,7 @@ private fun ProfileCandidateHeader(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 GAvatar(
-                    name = "Avik Kundu",
+                    name = candidateName,
                     size = if (isMobile) 46.dp else 52.dp,
                     hasRing = true
                 )
@@ -243,7 +384,7 @@ private fun ProfileCandidateHeader(
                         horizontalArrangement = Arrangement.spacedBy(GradPathSpace.sm)
                     ) {
                         Text(
-                            text = "Avik Kundu",
+                            text = candidateName,
                             fontSize = if (isMobile) 17.sp else 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = palette.textPrimary,
@@ -275,13 +416,54 @@ private fun ProfileCandidateHeader(
             // Quick Actions & Readiness Pill
             if (isMobile) {
                 Column(verticalArrangement = Arrangement.spacedBy(GradPathSpace.sm)) {
-                    ScoreBadgePill(score = scoreBreakdown.totalScore, isMobile = true)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ScoreBadgePill(score = scoreBreakdown.totalScore, isMobile = true)
+                        Surface(
+                            onClick = onRefresh,
+                            enabled = !isLoading,
+                            shape = RoundedCornerShape(GradPathRadii.rPill),
+                            color = palette.chip,
+                            border = BorderStroke(1.dp, palette.borderSoft),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(11.dp),
+                                        strokeWidth = 1.8.dp,
+                                        color = palette.academicBlue
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Sync from Firestore",
+                                        tint = palette.textSecondary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                                Text(
+                                    text = if (isLoading) "Syncing..." else "Sync Cloud",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isLoading) palette.academicBlue else palette.textSecondary
+                                )
+                            }
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(GradPathSpace.sm)
                     ) {
                         GButton(
-                            label = if (isEditMode) "Done Editing" else "Edit Profile",
+                            label = if (isEditMode) "Save Changes" else "Edit Profile",
                             onClick = onToggleEditMode,
                             variant = if (isEditMode) GBtnVariant.Primary else GBtnVariant.Secondary,
                             size = GBtnSize.SM,
@@ -315,7 +497,29 @@ private fun ProfileCandidateHeader(
                     ScoreBadgePill(score = scoreBreakdown.totalScore, isMobile = false)
                     Row(horizontalArrangement = Arrangement.spacedBy(GradPathSpace.md)) {
                         GButton(
-                            label = if (isEditMode) "Close Editor" else "Edit Profile",
+                            label = if (isLoading) "Syncing..." else "Sync Cloud",
+                            onClick = onRefresh,
+                            enabled = !isLoading,
+                            variant = GBtnVariant.Soft,
+                            size = GBtnSize.SM,
+                            leadingIcon = {
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(13.dp),
+                                        strokeWidth = 2.dp,
+                                        color = palette.academicBlue
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Sync from Firestore",
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        )
+                        GButton(
+                            label = if (isEditMode) "Save Changes" else "Edit Profile",
                             onClick = onToggleEditMode,
                             variant = if (isEditMode) GBtnVariant.Primary else GBtnVariant.Secondary,
                             size = GBtnSize.SM,
@@ -347,71 +551,6 @@ private fun ProfileCandidateHeader(
                             }
                         )
                     }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Toggle Pill allowing instant switching between Observe Mode and Edit Mode.
- */
-@Composable
-private fun ProfileModeSelectorPill(
-    isEditMode: Boolean,
-    onSelectMode: (Boolean) -> Unit
-) {
-    val palette = GradPathThemeTokens.palette
-    val outerShape = RoundedCornerShape(GradPathRadii.rPill)
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(outerShape)
-            .background(palette.chip)
-            .padding(GradPathSpace.xs)
-    ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            listOf(
-                Pair("👁 Observe Mode (Summary)", false),
-                Pair("✏ Edit Mode (Update Data)", true)
-            ).forEach { (label, editState) ->
-                val isSelected = isEditMode == editState
-                val pillShape = RoundedCornerShape(GradPathRadii.rPill)
-
-                val bgColor by animateColorAsState(
-                    targetValue = if (isSelected) palette.card else Color.Transparent,
-                    animationSpec = tween(150),
-                    label = "ModePillBg"
-                )
-                val textColor by animateColorAsState(
-                    targetValue = if (isSelected) palette.textPrimary else palette.textMuted,
-                    animationSpec = tween(150),
-                    label = "ModePillText"
-                )
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(36.dp)
-                        .then(if (isSelected) Modifier.shadow(2.dp, pillShape) else Modifier)
-                        .clip(pillShape)
-                        .background(bgColor)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { onSelectMode(editState) }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = label,
-                        fontSize = 12.5.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = textColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
             }
         }
@@ -556,8 +695,8 @@ private fun ProfileObserveModeView(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(GradPathSpace.sm)
                 ) {
-                    SummaryDataTile(label = "CGPA", value = if (profile.academic.gpa > 0) "${profile.academic.gpa}/4.0" else "3.88/4.0", modifier = Modifier.weight(1f))
-                    SummaryDataTile(label = "MAJOR", value = profile.academic.major.ifBlank { "CSE" }, modifier = Modifier.weight(1.3f))
+                    SummaryDataTile(label = "CGPA", value = if (profile.academic.gpa > 0) "${profile.academic.gpa}/4.0" else "Not Set", modifier = Modifier.weight(1f))
+                    SummaryDataTile(label = "MAJOR", value = profile.academic.major.ifBlank { "Not Set" }, modifier = Modifier.weight(1.3f))
                     SummaryDataTile(label = "GRAD YEAR", value = "${profile.academic.graduationYear}", modifier = Modifier.weight(1f))
                 }
 
@@ -566,9 +705,9 @@ private fun ProfileObserveModeView(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(GradPathSpace.sm)
                 ) {
-                    SummaryDataTile(label = "IELTS/TOEFL", value = if (profile.tests.ieltsOverall > 0) "${profile.tests.ieltsOverall}" else "8.0", modifier = Modifier.weight(1f))
-                    SummaryDataTile(label = "GRE QUANT", value = if (profile.tests.greQuant > 0) "${profile.tests.greQuant}/170" else "168/170", modifier = Modifier.weight(1f))
-                    SummaryDataTile(label = "GRE VERBAL", value = if (profile.tests.greVerbal > 0) "${profile.tests.greVerbal}/170" else "158/170", modifier = Modifier.weight(1f))
+                    SummaryDataTile(label = "IELTS/TOEFL", value = if (profile.tests.ieltsOverall > 0) "${profile.tests.ieltsOverall}" else "N/A", modifier = Modifier.weight(1f))
+                    SummaryDataTile(label = "GRE QUANT", value = if (profile.tests.greQuant > 0) "${profile.tests.greQuant}/170" else "N/A", modifier = Modifier.weight(1f))
+                    SummaryDataTile(label = "GRE VERBAL", value = if (profile.tests.greVerbal > 0) "${profile.tests.greVerbal}/170" else "N/A", modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -832,6 +971,30 @@ private fun ProfileEditModeView(
                         }
                     )
                 }
+            }
+        }
+
+        // 0. CANDIDATE IDENTITY
+        GCard(
+            modifier = Modifier.fillMaxWidth(),
+            radius = GradPathRadii.rL,
+            padding = PaddingValues(GradPathSpace.md)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(GradPathSpace.sm)) {
+                GKicker(text = "CANDIDATE IDENTITY")
+                Text(
+                    text = "Personal & Dossier Information",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary
+                )
+
+                ProfileInputField(
+                    value = draft.fullName,
+                    onValueChange = { onDraftChange(draft.copy(fullName = it)) },
+                    label = "Candidate Full Name",
+                    placeholder = "e.g. Nehal Ahmmed"
+                )
             }
         }
 

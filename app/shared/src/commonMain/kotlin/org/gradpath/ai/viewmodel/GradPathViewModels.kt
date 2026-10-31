@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import org.gradpath.ai.*
 
@@ -86,59 +87,20 @@ class FeedViewModel(
         _toastMessage.value = null
     }
 
-    suspend fun fetchFromFirestore() {
-        try {
-            val firestoreUrl = "https://firestore.googleapis.com/v1/projects/gradpathai-3915f/databases/(default)/documents/feed?key=AIzaSyAGOSdty4jWUwW4lvQPFAuqiA3oUnon1SU"
-            val res = client.get(firestoreUrl)
-            if (res.status == HttpStatusCode.OK) {
-                val jsonText = res.bodyAsText()
-                val jsonParser = Json { ignoreUnknownKeys = true }
-                val root = jsonParser.parseToJsonElement(jsonText).jsonObject
-                val docs = root["documents"]?.jsonArray ?: emptyList()
-                val items = mutableListOf<WatchdogOpportunity>()
-
-                for (doc in docs) {
-                    try {
-                        val fields = doc.jsonObject["fields"]?.jsonObject
-                        val payloadString = fields?.get("payloadJson")?.jsonObject?.get("stringValue")?.jsonPrimitive?.content
-                        if (!payloadString.isNullOrBlank()) {
-                            val parsed = jsonParser.decodeFromString<WatchdogOpportunity>(payloadString)
-                            items.add(parsed)
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                if (items.isNotEmpty()) {
-                    _feedItems.value = items.toList()
-                    if (_selectedItem.value == null) _selectedItem.value = items.first()
-                }
-            }
-        } catch (e: Exception) {
-            println("Firestore direct fallback error: ${e.message}")
-        }
-    }
-
-    fun fetchFeed(isServerConnected: Boolean) {
-        if (_feedItems.value.isNotEmpty() && _isLoading.value) return
+    fun fetchFeed(isServerConnected: Boolean = true) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                if (isServerConnected) {
-                    val response = client.get(GradPathConfig.endpoint("/api/feed"))
-                    if (response.status == HttpStatusCode.OK) {
-                        val items = response.body<List<WatchdogOpportunity>>()
-                        _feedItems.value = items
-                        if (_selectedItem.value == null && items.isNotEmpty()) {
-                            _selectedItem.value = items.first()
-                        }
-                    } else {
-                        fetchFromFirestore()
+                val response = client.get(GradPathConfig.endpoint("/api/feed"))
+                if (response.status == HttpStatusCode.OK) {
+                    val items = response.body<List<WatchdogOpportunity>>()
+                    _feedItems.value = items
+                    if (_selectedItem.value == null && items.isNotEmpty()) {
+                        _selectedItem.value = items.first()
                     }
-                } else {
-                    fetchFromFirestore()
                 }
             } catch (e: Exception) {
-                fetchFromFirestore()
+                println("[FeedViewModel] Failed to fetch feed: ${e.message}")
             } finally {
                 _isLoading.value = false
             }
@@ -340,8 +302,8 @@ class ProfileViewModel(
     private val _isAuditing = MutableStateFlow(false)
     val isAuditing: StateFlow<Boolean> = _isAuditing.asStateFlow()
 
-    private val _isLoaded = MutableStateFlow(false)
-    val isLoaded: StateFlow<Boolean> = _isLoaded.asStateFlow()
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _showDocAuditor = MutableStateFlow(false)
     val showDocAuditor: StateFlow<Boolean> = _showDocAuditor.asStateFlow()
@@ -350,29 +312,45 @@ class ProfileViewModel(
         _showDocAuditor.value = show
     }
 
-    fun loadProfile(isServerConnected: Boolean) {
-        if (!isServerConnected || _isLoaded.value) return
+    /**
+     * Loads the profile directly from the backend bridge.
+     */
+    fun loadProfile() {
         viewModelScope.launch {
+            _isLoading.value = true
             try {
                 val loaded: UserProfile = client.get(GradPathConfig.endpoint("/api/profile")).body()
                 _profile.value = loaded
-                _isLoaded.value = true
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                println("[ProfileViewModel] Error loading profile: ${e.message}")
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
-    fun updateProfile(newProfile: UserProfile, isServerConnected: Boolean) {
+    /**
+     * Updates the profile directly via backend bridge.
+     */
+    fun updateProfile(newProfile: UserProfile) {
         _profile.value = newProfile
         viewModelScope.launch {
-            if (isServerConnected) {
-                try {
-                    client.post(GradPathConfig.endpoint("/api/profile")) {
-                        contentType(ContentType.Application.Json)
-                        setBody(newProfile)
-                    }
-                } catch (_: Exception) {}
+            _isLoading.value = true
+            try {
+                client.post(GradPathConfig.endpoint("/api/profile")) {
+                    contentType(ContentType.Application.Json)
+                    setBody(newProfile)
+                }
+            } catch (e: Exception) {
+                println("[ProfileViewModel] Error updating profile: ${e.message}")
+            } finally {
+                _isLoading.value = false
             }
         }
+    }
+
+    fun refreshProfile() {
+        loadProfile()
     }
 
     fun runAudit(isServerConnected: Boolean) {
